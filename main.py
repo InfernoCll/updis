@@ -61,24 +61,30 @@ class CommuteRequest(BaseModel):
 @app.post("/commute")
 def simulate_commute(data: CommuteRequest):
     commute_results = {}
+
     query = """
-    SELECT ST_Distance(home.coordinates, work.coordinates) AS distance, average_speed
+    SELECT ST_Distance(home.coordinates, work.coordinates) AS distance, average_speed, transport_mode
     FROM agents
     JOIN buildings AS home ON agents.home_region = home.region
     JOIN buildings AS work ON agents.work_region = work.region
-    WHERE home.region = %s AND work.region = %s;
+    WHERE home.region = %s AND work.region = %s
+    AND transport_mode = ANY(%s);
     """
+    
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(query, (data.region, data.destination))
+            cursor.execute(query, (data.region, data.destination, data.transport_modes))
             result = cursor.fetchall()
+            
 
     for mode in data.transport_modes:
-        speeds = [row[1] for row in result if row[1] > 0]
-        distances = [row[0] for row in result]
-        average_time = sum(d / s for d, s in zip(distances, speeds)) / len(distances) if distances and speeds else 0
-        commute_results[mode] = {"average_commute_time": round(average_time, 2)}
-
+        speeds = [row[1] for row in result if row[2] == mode and row[1] > 0]  
+        distances = [row[0] for row in result if row[2] == mode] 
+        if distances and speeds:
+            average_time = sum(d / s for d, s in zip(distances, speeds)) / len(distances)  
+            commute_results[mode] = {"average_commute_time": round(average_time, 2)}
+        else:
+            commute_results[mode] = {"average_commute_time": None}  
     return {
         "region": data.region,
         "destination": data.destination,
